@@ -37,6 +37,43 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Output Mode for TypeScript Definitions
+    |--------------------------------------------------------------------------
+    |
+    | Determines how TypeScript definitions are organized:
+    | - 'single': All models in one file (default, backward compatible)
+    | - 'directory': Separate files for each model directory
+    | - 'namespace': Single file with nested TypeScript namespaces
+    */
+    'output-mode' => 'single',
+
+    /*
+    |--------------------------------------------------------------------------
+    | Output Directory for Multi-File Mode
+    |--------------------------------------------------------------------------
+    |
+    | Directory where multiple TypeScript definition files will be saved
+    | when using 'directory' output mode.
+    |
+    | Requires output-mode set to 'directory'
+    */
+    'output-directory' => './resources/js/types/models/',
+
+    /*
+    |--------------------------------------------------------------------------
+    | Preserve Namespace Structure
+    |--------------------------------------------------------------------------
+    |
+    | When true, maintains the full directory structure in output.
+    | When false, only uses the immediate parent directory for grouping.
+    |
+    | Example with true: Models\Box\SubCategory\Item -> box/subcategory.d.ts
+    | Example with false: Models\Box\SubCategory\Item -> box.d.ts
+    */
+    'preserve-namespace-structure' => false,
+
+    /*
+    |--------------------------------------------------------------------------
     | Generate TypeScript Interfaces in a Global Namespace
     |--------------------------------------------------------------------------
     |

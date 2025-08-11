@@ -1,5 +1,5 @@
 {
-    "name": "fumeapp/modeltyper",
+    "name": "alessionobile/modeltyper",
     "description": "Generate TypeScript interfaces from Laravel Models",
     "type": "library",
     "license": "MIT",
@@ -11,7 +11,8 @@
     ],
     "contributors": [
         "kevin olson <acidjazz@gmail.com>",
-        "tanner Campbell <tcamp022@gmail.com>"
+        "tanner Campbell <tcamp022@gmail.com>",
+        "Alessio <alessio@architected.dev>"
     ],
     "require": {
         "php": "^8.2",

@@ -48,6 +48,9 @@ class ModelTyperCommand extends Command
                             {--api-resources : Output api.MetApi interfaces}
                             {--fillables : Output model fillables}
                             {--fillable-suffix= : Appends to fillables}
+                            {--output-mode= : Output organization mode (single, directory, namespace)}
+                            {--output-directory= : Directory for multi-file output}
+                            {--preserve-namespace-structure : Maintain full namespace structure in output}
                             {--ignore-config : Ignore options set in config}';
 
     /**
@@ -73,7 +76,10 @@ class ModelTyperCommand extends Command
     public function handle(Generator $generator): int
     {
         try {
-            $output = $generator(
+            $outputMode = $this->getConfig('output-mode') ?: 'single';
+            $outputDirectory = $this->getConfig('output-directory');
+            
+            $result = $generator(
                 specificModel: $this->option('model'),
                 global: $this->getConfig('global'),
                 json: $this->getConfig('json'),
@@ -94,8 +100,35 @@ class ModelTyperCommand extends Command
                 optionalNullables: $this->getConfig('optional-nullables'),
                 fillables: $this->getConfig('fillables'),
                 fillableSuffix: $this->getConfig('fillable-suffix'),
+                outputMode: $outputMode,
+                preserveNamespaceStructure: $this->getConfig('preserve-namespace-structure'),
             );
 
+            // Handle multi-file output
+            if ($outputMode === 'directory' && is_array($result)) {
+                $outputDir = $outputDirectory ?: Config::get('modeltyper.output-directory', './resources/js/types/models/');
+                
+                if ($this->argument('output-file')) {
+                    // If output-file is provided, use its directory
+                    $outputDir = dirname($this->argument('output-file')) . '/';
+                }
+                
+                $this->files->ensureDirectoryExists($outputDir);
+                
+                foreach ($result as $filename => $content) {
+                    $filepath = $outputDir . $filename;
+                    $this->files->ensureDirectoryExists(dirname($filepath));
+                    $this->files->put($filepath, $content);
+                    $this->info('Generated: ' . $filepath);
+                }
+                
+                $this->info('TypeScript interfaces generated in ' . count($result) . ' files');
+                return CommandAlias::SUCCESS;
+            }
+            
+            // Handle single file output (backward compatibility)
+            $output = is_string($result) ? $result : $result['main'] ?? '';
+            
             /** @var string|null $path */
             $path = $this->argument('output-file');
 
