@@ -10,39 +10,29 @@ use Illuminate\Support\Str;
 use ReflectionClass;
 use Symfony\Component\Finder\SplFileInfo;
 
-class GenerateMultiFileOutput
+class GenerateNamespacedOutput
 {
     use ClassBaseName;
     use ModelRefClass;
 
-    /**
-     * @var array<string, string>
-     */
-    protected array $outputs = [];
-
-    /**
-     * @var array<string, array<int, ReflectionClass>>
-     */
-    protected array $enumReflectorsByFile = [];
-
-    /**
-     * @var array<string, array<int, array<string, mixed>>>
-     */
-    protected array $importsByFile = [];
-    
-    /**
-     * @var array<string, array<string, string>>
-     */
-    protected array $crossNamespaceImports = [];
-
+    protected string $output = '';
     protected string $indent = '';
 
     /**
-     * Generate TypeScript definitions in multiple files organized by directory.
+     * @var array<int, ReflectionClass>
+     */
+    protected array $enumReflectors = [];
+
+    /**
+     * @var array<int, array<string, mixed>>
+     */
+    protected array $imports = [];
+
+    /**
+     * Generate TypeScript definitions in a single file with namespaces.
      *
      * @param  Collection<int, SplFileInfo>  $models
      * @param  array<string, string>  $mappings
-     * @return array<string, string>
      *
      * @throws \ReflectionException
      */
@@ -67,7 +57,7 @@ class GenerateMultiFileOutput
         bool $fillables = false,
         string $fillableSuffix = 'Fillable',
         bool $preserveNamespaceStructure = false
-    ): array {
+    ): string {
         $modelBuilder = app(BuildModelDetails::class);
         $colAttrWriter = app(WriteColumnAttribute::class);
         $relationWriter = app(WriteRelationship::class);
@@ -77,26 +67,22 @@ class GenerateMultiFileOutput
 
         // Group models by their directory
         $groupedModels = $this->groupModelsByDirectory($models, $preserveNamespaceStructure);
-        
-        // First pass: collect all model names and their namespaces for cross-reference
-        $modelNamespaceMap = $this->buildModelNamespaceMap($groupedModels);
+
+        if ($global) {
+            $namespace = Config::get('modeltyper.global-namespace', 'models');
+            $this->output .= 'export {}' . PHP_EOL . 'declare global {' . PHP_EOL . "  export namespace {$namespace} {" . PHP_EOL . PHP_EOL;
+            $this->indent = '    ';
+        }
 
         foreach ($groupedModels as $groupName => $modelGroup) {
-            $output = '';
-            $enumReflectors = [];
-            $imports = [];
-            $crossNamespaceImports = [];
-            $namespaceName = $this->formatNamespaceName($groupName);
-            $namespaceIndent = '  ';
-
-            if ($global) {
-                $namespace = Config::get('modeltyper.global-namespace', 'models');
-                $output .= 'export {}' . PHP_EOL . 'declare global {' . PHP_EOL . "  export namespace {$namespace} {" . PHP_EOL . PHP_EOL;
-                $this->indent = '    ';
-            }
+            // Skip creating namespace for root models
+            $createNamespace = $groupName !== 'models';
+            $namespaceIndent = $createNamespace ? '  ' : '';
             
-            // Start namespace wrapper
-            $output .= "export namespace {$namespaceName} {" . PHP_EOL;
+            if ($createNamespace) {
+                $namespaceName = $this->formatNamespaceName($groupName);
+                $this->output .= "{$this->indent}export namespace {$namespaceName} {" . PHP_EOL;
+            }
 
             foreach ($modelGroup as $model) {
                 $entry = '';
@@ -121,7 +107,7 @@ class GenerateMultiFileOutput
                     'sums' => $sums,
                 ] = $modelDetails;
 
-                $imports = array_merge($imports, $modelImports->toArray());
+                $this->imports = array_merge($this->imports, $modelImports->toArray());
 
                 $declarationType = $useTypes ? 'type' : 'interface';
                 $openBrace = $useTypes ? ' = {' : ' {';
@@ -129,12 +115,12 @@ class GenerateMultiFileOutput
 
                 if ($columns->isNotEmpty()) {
                     $entry .= "{$this->indent}{$namespaceIndent}  // columns" . PHP_EOL;
-                    $columns->each(function ($att) use (&$entry, $reflectionModel, $colAttrWriter, $noHidden, $optionalNullables, $mappings, $useEnums, &$enumReflectors, $namespaceIndent) {
+                    $columns->each(function ($att) use (&$entry, $reflectionModel, $colAttrWriter, $noHidden, $optionalNullables, $mappings, $useEnums, $namespaceIndent) {
                         [$line, $enum] = $colAttrWriter(reflectionModel: $reflectionModel, attribute: $att, mappings: $mappings, indent: $this->indent . $namespaceIndent, noHidden: $noHidden, optionalNullables: $optionalNullables, useEnums: $useEnums);
                         if (! empty($line)) {
                             $entry .= $line;
                             if ($enum) {
-                                $enumReflectors[] = $enum;
+                                $this->enumReflectors[] = $enum;
                             }
                         }
                     });
@@ -142,12 +128,12 @@ class GenerateMultiFileOutput
 
                 if ($nonColumns->isNotEmpty()) {
                     $entry .= "{$this->indent}{$namespaceIndent}  // mutators" . PHP_EOL;
-                    $nonColumns->each(function ($att) use (&$entry, $reflectionModel, $colAttrWriter, $noHidden, $optionalNullables, $mappings, $useEnums, &$enumReflectors, $namespaceIndent) {
+                    $nonColumns->each(function ($att) use (&$entry, $reflectionModel, $colAttrWriter, $noHidden, $optionalNullables, $mappings, $useEnums, $namespaceIndent) {
                         [$line, $enum] = $colAttrWriter(reflectionModel: $reflectionModel, attribute: $att, mappings: $mappings, indent: $this->indent . $namespaceIndent, noHidden: $noHidden, optionalNullables: $optionalNullables, useEnums: $useEnums);
                         if (! empty($line)) {
                             $entry .= $line;
                             if ($enum) {
-                                $enumReflectors[] = $enum;
+                                $this->enumReflectors[] = $enum;
                             }
                         }
                     });
@@ -163,13 +149,16 @@ class GenerateMultiFileOutput
 
                 if ($relations->isNotEmpty() && ! $noRelations) {
                     $entry .= "{$this->indent}{$namespaceIndent}  // relations" . PHP_EOL;
-                    $relations->each(function ($rel) use (&$entry, $relationWriter, $optionalRelations, $plurals, $namespaceIndent, $modelNamespaceMap, $groupName, &$crossNamespaceImports) {
-                        // Check if related model is in different namespace
+                    $relations->each(function ($rel) use (&$entry, $relationWriter, $optionalRelations, $plurals, $namespaceIndent, $groupedModels, $groupName) {
+                        // Check if the related model is in a different namespace
                         $relatedName = $rel['related'];
-                        if (isset($modelNamespaceMap[$relatedName]) && $modelNamespaceMap[$relatedName] !== $groupName) {
-                            $relatedNamespace = $this->formatNamespaceName($modelNamespaceMap[$relatedName]);
-                            $crossNamespaceImports[$relatedName] = $relatedNamespace;
+                        $relatedNamespace = $this->findModelNamespace($relatedName, $groupedModels);
+                        
+                        if ($relatedNamespace && $relatedNamespace !== $groupName) {
+                            // Prefix with namespace if in different namespace
+                            $rel['related'] = $this->formatNamespaceName($relatedNamespace) . '.' . $rel['related'];
                         }
+                        
                         $entry .= $relationWriter(relation: $rel, indent: $this->indent . $namespaceIndent, optionalRelation: $optionalRelations, plurals: $plurals);
                     });
                 }
@@ -226,46 +215,35 @@ class GenerateMultiFileOutput
                 }
 
                 $entry .= PHP_EOL;
-                $output .= $entry;
+                $this->output .= $entry;
             }
 
             // Add enums for this namespace
-            collect($enumReflectors)
+            collect($this->enumReflectors)
                 ->unique(fn (ReflectionClass $reflector) => $reflector->getName())
-                ->each(function (ReflectionClass $reflector) use (&$output, $useEnums, $namespaceIndent) {
-                    $output .= app(WriteEnumConst::class)($reflector, $this->indent . $namespaceIndent, false, $useEnums);
-                });
-            
-            // Close namespace
-            $output .= "}" . PHP_EOL . PHP_EOL;
-            
-            // Add cross-namespace imports at the top of the file
-            if (!empty($crossNamespaceImports)) {
-                $importStatements = '';
-                foreach ($crossNamespaceImports as $modelName => $fromNamespace) {
-                    $importStatements .= "import { {$modelName} } from './{$this->getFilenameForGroup($modelNamespaceMap[$modelName])}'.replace('.d.ts', '')" . PHP_EOL;
-                }
-                $output = $importStatements . PHP_EOL . $output;
-            }
-
-            // Add imports for this file (external libraries)
-            collect($imports)
-                ->unique()
-                ->each(function ($import) use (&$output) {
-                    $importTypeWithoutGeneric = Str::before($import['type'], '<');
-                    $entry = "import { {$importTypeWithoutGeneric} } from '{$import['import']}'" . PHP_EOL;
-                    $output = $entry . $output;
+                ->each(function (ReflectionClass $reflector) use ($useEnums, $namespaceIndent) {
+                    $this->output .= app(WriteEnumConst::class)($reflector, $this->indent . $namespaceIndent, false, $useEnums);
                 });
 
-            if ($global) {
-                $output .= '  }' . PHP_EOL . '}' . PHP_EOL . PHP_EOL;
+            if ($createNamespace) {
+                $this->output .= "{$this->indent}}" . PHP_EOL . PHP_EOL;
             }
-
-            $filename = $this->getFilenameForGroup($groupName);
-            $this->outputs[$filename] = substr($output, 0, strrpos($output, PHP_EOL));
         }
 
-        return $this->outputs;
+        // Add imports
+        collect($this->imports)
+            ->unique()
+            ->each(function ($import) {
+                $importTypeWithoutGeneric = Str::before($import['type'], '<');
+                $entry = "import { {$importTypeWithoutGeneric} } from '{$import['import']}'" . PHP_EOL;
+                $this->output = $entry . $this->output;
+            });
+
+        if ($global) {
+            $this->output .= '  }' . PHP_EOL . '}' . PHP_EOL . PHP_EOL;
+        }
+
+        return substr($this->output, 0, strrpos($this->output, PHP_EOL));
     }
 
     /**
@@ -323,23 +301,6 @@ class GenerateMultiFileOutput
     }
 
     /**
-     * Generate filename for a group.
-     *
-     * @param  string  $groupName
-     * @return string
-     */
-    protected function getFilenameForGroup(string $groupName): string
-    {
-        if ($groupName === 'models') {
-            return 'models.d.ts';
-        }
-
-        // Replace directory separators with appropriate naming
-        $filename = str_replace('/', '-', $groupName);
-        return $filename . '.d.ts';
-    }
-    
-    /**
      * Format namespace name for TypeScript.
      *
      * @param  string  $groupName
@@ -347,27 +308,22 @@ class GenerateMultiFileOutput
      */
     protected function formatNamespaceName(string $groupName): string
     {
-        if ($groupName === 'models') {
-            return 'Models';
-        }
-        
         // Convert to PascalCase for TypeScript namespace
         $parts = explode('/', $groupName);
         return collect($parts)
             ->map(fn($part) => Str::studly($part))
             ->implode('');
     }
-    
+
     /**
-     * Build a map of model names to their namespace groups.
+     * Find which namespace a model belongs to.
      *
+     * @param  string  $modelName
      * @param  array<string, Collection<int, SplFileInfo>>  $groupedModels
-     * @return array<string, string>
+     * @return string|null
      */
-    protected function buildModelNamespaceMap(array $groupedModels): array
+    protected function findModelNamespace(string $modelName, array $groupedModels): ?string
     {
-        $map = [];
-        
         foreach ($groupedModels as $groupName => $models) {
             foreach ($models as $model) {
                 $class = app()->getNamespace() . str_replace(
@@ -376,11 +332,12 @@ class GenerateMultiFileOutput
                     Str::after($model->getPathname(), app_path() . DIRECTORY_SEPARATOR)
                 );
                 
-                $modelName = $this->getClassName($class);
-                $map[$modelName] = $groupName;
+                if (Str::endsWith($class, '\\' . $modelName)) {
+                    return $groupName;
+                }
             }
         }
         
-        return $map;
+        return null;
     }
 }

@@ -59,14 +59,16 @@ class GenerateMultiFileOutputTest extends TestCase
         $this->assertArrayHasKey('box.d.ts', $results);
         $this->assertArrayHasKey('product.d.ts', $results);
         
-        // Check Box namespace contains Box and Image models
+        // Check Box file has namespace wrapper
         $boxContent = $results['box.d.ts'];
+        $this->assertStringContainsString('export namespace Box {', $boxContent);
         $this->assertStringContainsString('export interface Box {', $boxContent);
         $this->assertStringContainsString('export interface Image {', $boxContent);
         $this->assertStringContainsString('box_id:', $boxContent);
         
-        // Check Product namespace contains Product and Image models
+        // Check Product file has namespace wrapper
         $productContent = $results['product.d.ts'];
+        $this->assertStringContainsString('export namespace Product {', $productContent);
         $this->assertStringContainsString('export interface Product {', $productContent);
         $this->assertStringContainsString('export interface Image {', $productContent);
         $this->assertStringContainsString('product_id:', $productContent);

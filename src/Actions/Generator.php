@@ -99,6 +99,31 @@ class Generator
                 preserveNamespaceStructure: $preserveNamespaceStructure
             );
         }
+        
+        if ($outputMode === 'namespace') {
+            return app(GenerateNamespacedOutput::class)(
+                models: $models,
+                mappings: $mappings,
+                global: $global,
+                useEnums: $useEnums,
+                useTypes: $useTypes,
+                plurals: $plurals,
+                apiResources: $apiResources,
+                optionalRelations: $optionalRelations,
+                noRelations: $noRelations,
+                noHidden: $noHidden,
+                noCounts: $noCounts,
+                optionalCounts: $optionalCounts,
+                noExists: $noExists,
+                optionalExists: $optionalExists,
+                noSums: $noSums,
+                optionalSums: $optionalSums,
+                optionalNullables: $optionalNullables,
+                fillables: $fillables,
+                fillableSuffix: $fillableSuffix,
+                preserveNamespaceStructure: $preserveNamespaceStructure
+            );
+        }
 
         // Default to single file output (backward compatibility)
         return app(GenerateCliOutput::class)(
