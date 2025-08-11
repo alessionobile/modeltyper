@@ -164,12 +164,40 @@ class GenerateMultiFileOutput
                 if ($relations->isNotEmpty() && ! $noRelations) {
                     $entry .= "{$this->indent}{$namespaceIndent}  // relations" . PHP_EOL;
                     $relations->each(function ($rel) use (&$entry, $relationWriter, $optionalRelations, $plurals, $namespaceIndent, $modelNamespaceMap, $groupName, &$crossNamespaceImports) {
-                        // Check if related model is in different namespace
+                        // Use full class name if available to determine namespace
+                        $relatedFullClass = $rel['relatedFullClass'] ?? null;
                         $relatedName = $rel['related'];
-                        if (isset($modelNamespaceMap[$relatedName]) && $modelNamespaceMap[$relatedName] !== $groupName) {
-                            $relatedNamespace = $this->formatNamespaceName($modelNamespaceMap[$relatedName]);
-                            $crossNamespaceImports[$relatedName] = $relatedNamespace;
+                        
+                        if ($relatedFullClass) {
+                            // Extract just the class name from full class
+                            $relatedBaseName = $this->getClassName($relatedFullClass);
+                            
+                            // Find the matching model in our map by comparing full class names
+                            $relatedGroup = null;
+                            foreach ($modelNamespaceMap as $modelName => $info) {
+                                if ($info['fullClass'] === $relatedFullClass) {
+                                    $relatedGroup = $info['group'];
+                                    break;
+                                }
+                            }
+                            
+                            // Check if it's in a different namespace
+                            if ($relatedGroup && $relatedGroup !== $groupName) {
+                                $relatedNamespace = $this->formatNamespaceName($relatedGroup);
+                                $crossNamespaceImports[$relatedBaseName] = $relatedNamespace;
+                                // Prefix the related model with its namespace
+                                $rel['related'] = $relatedNamespace . '.' . $relatedBaseName;
+                            }
+                        } else {
+                            // Fallback to original logic if we couldn't get full class name
+                            if (isset($modelNamespaceMap[$relatedName]) && $modelNamespaceMap[$relatedName]['group'] !== $groupName) {
+                                $relatedNamespace = $this->formatNamespaceName($modelNamespaceMap[$relatedName]['group']);
+                                $crossNamespaceImports[$relatedName] = $relatedNamespace;
+                                // Prefix the related model with its namespace
+                                $rel['related'] = $relatedNamespace . '.' . $relatedName;
+                            }
                         }
+                        
                         $entry .= $relationWriter(relation: $rel, indent: $this->indent . $namespaceIndent, optionalRelation: $optionalRelations, plurals: $plurals);
                     });
                 }
@@ -242,8 +270,25 @@ class GenerateMultiFileOutput
             // Add cross-namespace imports at the top of the file
             if (!empty($crossNamespaceImports)) {
                 $importStatements = '';
+                $importedNamespaces = [];
                 foreach ($crossNamespaceImports as $modelName => $fromNamespace) {
-                    $importStatements .= "import { {$modelName} } from './{$this->getFilenameForGroup($modelNamespaceMap[$modelName])}'.replace('.d.ts', '')" . PHP_EOL;
+                    // Import the whole namespace, not individual models
+                    if (!in_array($fromNamespace, $importedNamespaces)) {
+                        // Find the group for this namespace
+                        $targetGroup = null;
+                        foreach ($modelNamespaceMap as $name => $info) {
+                            if ($name === $modelName) {
+                                $targetGroup = $info['group'];
+                                break;
+                            }
+                        }
+                        
+                        if ($targetGroup) {
+                            $filename = str_replace('.d.ts', '', $this->getFilenameForGroup($targetGroup));
+                            $importStatements .= "import { {$fromNamespace} } from './{$filename}'" . PHP_EOL;
+                            $importedNamespaces[] = $fromNamespace;
+                        }
+                    }
                 }
                 $output = $importStatements . PHP_EOL . $output;
             }
@@ -362,7 +407,7 @@ class GenerateMultiFileOutput
      * Build a map of model names to their namespace groups.
      *
      * @param  array<string, Collection<int, SplFileInfo>>  $groupedModels
-     * @return array<string, string>
+     * @return array<string, array>
      */
     protected function buildModelNamespaceMap(array $groupedModels): array
     {
@@ -377,7 +422,11 @@ class GenerateMultiFileOutput
                 );
                 
                 $modelName = $this->getClassName($class);
-                $map[$modelName] = $groupName;
+                // Store both the group name and full class for better matching
+                $map[$modelName] = [
+                    'group' => $groupName,
+                    'fullClass' => $class
+                ];
             }
         }
         

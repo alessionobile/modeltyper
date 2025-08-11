@@ -39,6 +39,11 @@ class BuildModelDetails
         $columns = collect($modelDetails['attributes'])->filter(fn ($att) => in_array($att['name'], $databaseColumns));
         $nonColumns = collect($modelDetails['attributes'])->filter(fn ($att) => ! in_array($att['name'], $databaseColumns));
         $relations = collect($modelDetails['relations'])
+            ->map(function ($relation) use ($reflectionModel) {
+                // Try to get the full class name of the related model
+                $relation['relatedFullClass'] = $this->getRelatedModelFullClass($reflectionModel, $relation);
+                return $relation;
+            })
             ->when($includedModels, function ($relations, $includedModels) {
                 return $relations->filter(fn (array $relation) => in_array($relation['related'], $includedModels));
             })
@@ -110,5 +115,42 @@ class BuildModelDetails
 
             return $includeColumn;
         });
+    }
+    
+    /**
+     * Get the full class name of a related model by inspecting the relationship method.
+     */
+    private function getRelatedModelFullClass(ReflectionClass $reflectionModel, array $relation): ?string
+    {
+        try {
+            $methodName = $relation['name'] ?? null;
+            if (!$methodName) {
+                return null;
+            }
+            
+            // Check if the method exists
+            if (!$reflectionModel->hasMethod($methodName)) {
+                return null;
+            }
+            
+            $method = $reflectionModel->getMethod($methodName);
+            
+            // Create an instance to call the method
+            $instance = $reflectionModel->newInstanceWithoutConstructor();
+            
+            // Call the relationship method
+            $relationship = $method->invoke($instance);
+            
+            // Get the related model class
+            if (method_exists($relationship, 'getRelated')) {
+                $relatedModel = $relationship->getRelated();
+                return get_class($relatedModel);
+            }
+            
+            return null;
+        } catch (\Exception $e) {
+            // If we can't determine the full class, return null
+            return null;
+        }
     }
 }

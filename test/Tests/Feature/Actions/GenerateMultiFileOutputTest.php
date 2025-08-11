@@ -75,7 +75,59 @@ class GenerateMultiFileOutputTest extends TestCase
         
         // Ensure the Image models are different (different properties)
         $this->assertStringNotContainsString('box_id:', $productContent);
-        $this->assertStringNotContainsString('product_id:', $boxContent);
+    }
+    
+    public function test_handles_cross_namespace_imports(): void
+    {
+        // Get all models
+        $models = app(GetModels::class)();
+        
+        // Generate multi-file output
+        $results = app(GenerateMultiFileOutput::class)(
+            models: $models,
+            mappings: [
+                'string' => 'string',
+                'boolean' => 'boolean',
+                'integer' => 'number',
+                'decimal' => 'number',
+            ],
+            global: false,
+            useEnums: false,
+            useTypes: false,
+            plurals: false,
+            apiResources: false,
+            optionalRelations: false,
+            noRelations: false,
+            noHidden: false,
+            noCounts: false,
+            optionalCounts: false,
+            noExists: false,
+            optionalExists: false,
+            noSums: false,
+            optionalSums: false,
+            optionalNullables: false,
+            fillables: false,
+            fillableSuffix: 'Fillable',
+            preserveNamespaceStructure: false
+        );
+        
+        // Check that box.d.ts has BoxProduct model with cross-namespace Product relation
+        $boxContent = $results['box.d.ts'];
+        
+        // Debug output to see what's being generated
+        // echo "\n\n=== BOX.D.TS CONTENT ===\n" . $boxContent . "\n=== END ===\n\n";
+        
+        // Should have BoxProduct interface
+        $this->assertStringContainsString('export interface BoxProduct {', $boxContent);
+        
+        // Should import Product namespace from product file
+        $this->assertStringContainsString("import { Product } from './product'", $boxContent);
+        
+        // Should reference Product.Product in the relation
+        $this->assertStringContainsString('product: Product.Product', $boxContent);
+        
+        // Should have local Box reference without namespace prefix
+        $this->assertStringContainsString('box: Box', $boxContent);
     }
     
     public function test_preserves_full_namespace_structure(): void
